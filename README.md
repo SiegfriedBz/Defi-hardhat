@@ -1,13 +1,10 @@
-# Sample Hardhat Project
+# Defi-hardhat Project
 
-This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a script that deploys that contract.
+Scripts to get Weth + Lend Weth on Aave
 
 Try running some of the following tasks:
 
 ```shell
-npx hardhat help
-npx hardhat test
-REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat run scripts/deploy.js
+yarn hardhat help
+yarn hardhat run scripts/aaveBorrow.js   
 ```
