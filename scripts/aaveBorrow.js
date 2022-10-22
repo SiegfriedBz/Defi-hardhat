@@ -9,9 +9,8 @@ async function main() {
   const wethAmount = await getWeth(ethAmount)
 
   // 2. Lend Weth on LendingPool
-  // 2.1 Call ILendingPoolAddressesProvider => Get LendingPool Address
+  // 2.1 Call ILendingPoolAddressesProvider => Get LendingPool Address => Contract
   const lendingPool = await getLendingPool(deployer)
-  console.log(`LendingPool address: ${lendingPool.address}`)
   // 2.2 Approve LendingPool to spend our Weth
   const wethAddress = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" // MAIN Net address (forked main net)
   await approveErc20(
@@ -218,7 +217,8 @@ async function getLendingPool(account) {
     lendingPool_Address,
     account
   )
-  console.log("You have LendingPool contract")
+  console.log(`LendingPool address: ${lendingPool.address}`)
+  console.log("You can now interact with LendingPool contract")
   return lendingPool
 }
 
