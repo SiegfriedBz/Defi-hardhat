@@ -3,25 +3,35 @@ const { getWeth } = require("./getWeth")
 
 async function main() {
   const { deployer } = await getNamedAccounts()
+
   // 1. Get Weth ERC20
-  const ethAmount = ethers.utils.parseEther("0.1")
-  const WethAmount = await getWeth(ethAmount)
+  const ethAmount = ethers.utils.parseEther("1")
+  const wethAmount = await getWeth(ethAmount)
+
   // 2. Lend Weth on LendingPool
   // 2.1 Call ILendingPoolAddressesProvider => Get LendingPool Address
   const lendingPool = await getLendingPool(deployer)
   console.log(`LendingPool address: ${lendingPool.address}`)
   // 2.2 Approve LendingPool to spend our Weth
-  const WethAddress = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" // MAIN Net address (forked main net)
-  await approveErc20(WethAddress, lendingPool.address, WethAmount, deployer)
+  const wethAddress = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" // MAIN Net address (forked main net)
+  await approveErc20(
+    "Weth",
+    wethAddress,
+    lendingPool.address,
+    wethAmount,
+    deployer
+  )
+
   // 2.3 Deposit
   console.log("---")
   console.log("Depositing Weth on LendingPool...")
-  await lendingPool.deposit(WethAddress, WethAmount, deployer, 0)
+  await lendingPool.deposit(wethAddress, wethAmount, deployer, 0)
   console.log(
     `${ethers.utils.formatEther(
-      WethAmount
+      wethAmount
     )} Weth deposited on Aave LendingPool.`
   )
+
   // 3. Borrow DAI
   const { availableBorrowsETH, totalDebtETH } = await getBorrowUserData(
     lendingPool,
@@ -37,15 +47,40 @@ async function main() {
   )
   console.log(`You can borrow ${amountDaiToBorrowInWei} DAI (in wei)`)
   const daiAddress = "0x6B175474E89094C44Da98b954EedeAC495271d0F" // MAIN Net address (forked main net)
-  await borrowDai(daiAddress, lendingPool, amountDaiToBorrowInWei, deployer)
+  await borrowDai(lendingPool, daiAddress, amountDaiToBorrowInWei, deployer)
   await getBorrowUserData(lendingPool, deployer)
 
   // 4. Repay DAI
+  const amountDaiToRepay = amountDaiToBorrowInWei
+  // 4.1 Approve LendingPool to spend our DAI
+  await approveErc20(
+    "DAI",
+    daiAddress,
+    lendingPool.address,
+    amountDaiToRepay,
+    deployer
+  )
+  // 4.2 Repay
+  await repayDai(lendingPool, daiAddress, amountDaiToRepay, deployer)
+  await getBorrowUserData(lendingPool, deployer)
+}
+
+async function repayDai(lendingPool, asset, amount, account) {
+  console.log("---")
+  console.log("Repaying DAI...")
+  let trx = await lendingPool.repay(
+    asset,
+    amount,
+    1, // interestRateMode:  1 for Stable, 2 for Variable
+    account // onBehalfOf
+  )
+  await trx.wait(1)
+  console.log(`You repaid ${ethers.utils.formatEther(amount)} DAI`)
 }
 
 async function borrowDai(
-  daiAddress,
   lendingPool,
+  daiAddress,
   amountDaiToBorrowInWei,
   account
 ) {
@@ -54,12 +89,35 @@ async function borrowDai(
   let trx = await lendingPool.borrow(
     daiAddress,
     amountDaiToBorrowInWei,
-    1, // uint256 interestRateMode:  1 for Stable, 2 for Variable
-    0,
-    account
+    1, // interestRateMode:  1 for Stable, 2 for Variable
+    0, // referralCode
+    account // onBehalfOf
   )
+
   await trx.wait(1)
-  console.log("You borrowed DAI")
+  console.log(
+    `You borrowed ${ethers.utils.formatEther(amountDaiToBorrowInWei)} DAI`
+  )
+}
+
+async function getEthUdstPrice() {
+  const ethUsdtPriceFeed = await ethers.getContractAt(
+    "AggregatorV3Interface",
+    "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419" // main net address
+  )
+
+  let decimals = await ethUsdtPriceFeed.decimals()
+  decimals = parseInt(decimals)
+
+  const ethUsdtPrice = (await ethUsdtPriceFeed.latestRoundData())[1]
+  console.log(
+    `1 ETH currently worths ${ethers.utils.formatUnits(
+      ethUsdtPrice,
+      decimals
+    )} USDT`
+  )
+
+  return ethUsdtPrice
 }
 
 async function getDaiEthPrice() {
@@ -71,7 +129,6 @@ async function getDaiEthPrice() {
   console.log("Getting Dai/Eth Price...")
   let decimals = await daiEthPriceFeed.decimals()
   decimals = parseInt(decimals)
-
   const daiEthPrice = (await daiEthPriceFeed.latestRoundData())[1]
 
   console.log(
@@ -85,26 +142,47 @@ async function getDaiEthPrice() {
 
 async function getBorrowUserData(lendingPool, account) {
   console.log("---")
-  console.log("Borrow User Data...")
-  const { totalCollateralETH, totalDebtETH, availableBorrowsETH } =
-    await lendingPool.getUserAccountData(account)
+  // ETH/USDT Price
+  console.log("Getting ETH/USDT Price from ChainLink Pricefeeds...")
+  const ethUsdtPrice = await getEthUdstPrice()
+
+  // LendingPool User Data
+  console.log("Getting User Data from LendingPool...")
+  const {
+    totalCollateralETH,
+    totalDebtETH,
+    availableBorrowsETH,
+  } = await lendingPool.getUserAccountData(account)
 
   console.log(
-    `You deposited ${ethers.utils.formatEther(totalCollateralETH)} of ETH worth`
+    `--> Your Collateral is currently ${ethers.utils.formatEther(
+      totalCollateralETH
+    )} of ETH worth`
   )
   console.log(
-    `You have borrowed ${ethers.utils.formatEther(totalDebtETH)} of ETH worth`
+    `--> You have borrowed ${ethers.utils.formatEther(
+      totalDebtETH
+    )} of ETH worth`
   )
   console.log(
-    `You can borrow ${ethers.utils.formatEther(
+    `--> You can borrow ${ethers.utils.formatEther(
       availableBorrowsETH
     )} of ETH worth`
+  )
+
+  // LendingPool Collateral in USDT Value
+  const collateralUsdtValue = totalCollateralETH.mul(ethUsdtPrice).div(10 ** 8)
+  console.log(
+    `--> Your Collateral is currently ${ethers.utils.formatEther(
+      collateralUsdtValue
+    )} of USDT worth`
   )
 
   return { availableBorrowsETH, totalDebtETH }
 }
 
 async function approveErc20(
+  erc20Symbol,
   erc20Address,
   spenderAddress,
   amountToSpend,
@@ -116,7 +194,9 @@ async function approveErc20(
   const trx = await iErc20.approve(spenderAddress, amountToSpend)
   await trx.wait(1)
   console.log(
-    `Lending Pool approved for ${ethers.utils.formatEther(amountToSpend)} Weth`
+    `Lending Pool approved for ${ethers.utils.formatEther(
+      amountToSpend
+    )} ${erc20Symbol}`
   )
 }
 
@@ -130,8 +210,7 @@ async function getLendingPool(account) {
     account
   )
   // Get LendingPool contract address
-  const lendingPool_Address =
-    await iLendingPoolAddressesProvider.getLendingPool()
+  const lendingPool_Address = await iLendingPoolAddressesProvider.getLendingPool()
 
   // Get ILendingPool contract
   const lendingPool = await ethers.getContractAt(
